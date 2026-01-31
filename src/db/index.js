@@ -2,8 +2,8 @@ const initSqlJs = require('sql.js');
 const fs = require('fs');
 const path = require('path');
 
-// Database file path
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../../data/thepit.db');
+// Database file path - use /app/data for Railway persistent volume
+const DB_PATH = process.env.DB_PATH || '/app/data/pit.db';
 
 let db = null;
 
