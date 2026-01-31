@@ -26,6 +26,7 @@ body {
   color: var(--text);
   line-height: 1.6;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 a {
@@ -88,6 +89,118 @@ a:hover {
 .search-bar input:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+.search-bar {
+  position: relative;
+}
+
+.search-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-top: 4px;
+  max-height: 400px;
+  overflow-y: auto;
+  z-index: 200;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.search-section {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.search-section:last-of-type {
+  border-bottom: none;
+}
+
+.search-section-title {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding: 0.25rem 0.75rem;
+}
+
+.search-result {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.search-result:hover {
+  background: var(--bg-hover);
+}
+
+.search-result-avatar {
+  width: 28px;
+  height: 28px;
+  background: var(--accent);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 0.75rem;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.search-result-icon {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  flex-shrink: 0;
+}
+
+.search-result-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.search-result-name {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-result-meta {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+.search-no-results {
+  padding: 1rem;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.search-footer {
+  padding: 0.5rem 0.75rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--accent);
+  cursor: pointer;
+  border-top: 1px solid var(--border);
+}
+
+.search-footer:hover {
+  background: var(--bg-hover);
 }
 
 .nav {
@@ -154,6 +267,7 @@ a:hover {
   max-width: 1400px;
   margin: 0 auto;
   padding: 1.5rem 2rem;
+  overflow-x: hidden;
 }
 
 .grid {
@@ -221,6 +335,37 @@ a:hover {
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 0.5rem;
+  gap: 0.5rem;
+}
+
+.card-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.task-deadline {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  background: var(--bg-hover);
+  color: var(--text-dim);
+}
+
+.deadline-passed {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.deadline-urgent {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.deadline-soon {
+  color: var(--warning);
+  font-weight: 500;
 }
 
 .card-title {
@@ -704,11 +849,12 @@ a:hover {
 
 .chat-messages {
   flex: 1;
-  overflow-y: auto;
+  overflow-y: scroll;
   padding: 1rem;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  min-height: 0; /* Fix flexbox scroll issue */
 }
 
 .chat-message {

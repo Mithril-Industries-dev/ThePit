@@ -98,6 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupDashboard();
   setupForms();
   setupSearch();
+  setupAgentFilters();
 
   loadStats();
   loadTasks();
@@ -305,27 +306,46 @@ function renderTasks(tasks) {
     return;
   }
 
-  container.innerHTML = tasks.map(task => `
-    <div class="card" onclick="openTaskModal('${task.id}')">
-      <div class="card-header">
-        <span class="card-title">${escapeHtml(task.title)}</span>
-        <span class="badge badge-${task.status}">${task.status}</span>
-      </div>
-      <div class="card-body">${escapeHtml(task.description)}</div>
-      <div class="card-footer">
-        <div class="reward">${task.reward} credits</div>
-        <div class="card-meta">
-          by <span class="clickable" onclick="event.stopPropagation(); openAgentModal('${task.requester_id}')">${escapeHtml(task.requester_name || 'Unknown')}</span>
-          <span class="rep-badge ${getRepClass(task.requester_reputation)}">${Math.round(task.requester_reputation)} rep</span>
+  container.innerHTML = tasks.map(task => {
+    const deadlineHtml = task.deadline ? `<span class="task-deadline">${formatDeadline(task.deadline)}</span>` : '';
+
+    return `
+      <div class="card" onclick="openTaskModal('${task.id}')">
+        <div class="card-header">
+          <span class="card-title">${escapeHtml(task.title)}</span>
+          <div class="card-header-right">
+            ${deadlineHtml}
+            <span class="badge badge-${task.status}">${task.status}</span>
+          </div>
         </div>
-      </div>
-      ${task.required_skills?.length ? `
-        <div class="skills">
-          ${task.required_skills.map(s => `<span class="skill">${escapeHtml(s)}</span>`).join('')}
+        <div class="card-body">${escapeHtml(task.description)}</div>
+        <div class="card-footer">
+          <div class="reward">${task.reward} credits</div>
+          <div class="card-meta">
+            by <span class="clickable" onclick="event.stopPropagation(); openAgentModal('${task.requester_id}')">${escapeHtml(task.requester_name || 'Unknown')}</span>
+            <span class="rep-badge ${getRepClass(task.requester_reputation)}">${Math.round(task.requester_reputation)} rep</span>
+          </div>
         </div>
-      ` : ''}
-    </div>
-  `).join('');
+        ${task.required_skills?.length ? `
+          <div class="skills">
+            ${task.required_skills.map(s => `<span class="skill">${escapeHtml(s)}</span>`).join('')}
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+function formatDeadline(deadline) {
+  const date = new Date(deadline);
+  const now = new Date();
+  const diff = date - now;
+
+  if (diff < 0) return '<span class="deadline-passed">Overdue</span>';
+  if (diff < 3600000) return '<span class="deadline-urgent">< 1h left</span>';
+  if (diff < 86400000) return `<span class="deadline-soon">${Math.floor(diff / 3600000)}h left</span>`;
+  if (diff < 604800000) return `${Math.floor(diff / 86400000)}d left`;
+  return date.toLocaleDateString();
 }
 
 function updatePagination(total) {
@@ -720,24 +740,7 @@ async function loadAgents() {
   try {
     const data = await api(`/agents?sort=${sort}&limit=50`);
     state.agents = data.agents;
-
-    container.innerHTML = data.agents.map(agent => `
-      <div class="card agent-card" onclick="openAgentModal('${agent.id}')">
-        <div class="agent-avatar">${agent.name.charAt(0).toUpperCase()}</div>
-        <div class="agent-info">
-          <div class="agent-name">${escapeHtml(agent.name)}</div>
-          ${agent.bio ? `<div class="agent-bio">${escapeHtml(agent.bio.substring(0, 100))}</div>` : ''}
-          <div class="agent-stats">
-            <span class="agent-stat"><strong>${Math.round(agent.reputation)}</strong> rep</span>
-            <span class="agent-stat"><strong>${formatCredits(agent.credits)}</strong> credits</span>
-            <span class="agent-stat"><strong>${agent.tasks_completed}</strong> tasks</span>
-          </div>
-          ${agent.skills?.length ? `
-            <div class="skills">${agent.skills.slice(0, 5).map(s => `<span class="skill">${escapeHtml(s)}</span>`).join('')}</div>
-          ` : ''}
-        </div>
-      </div>
-    `).join('');
+    renderAgentsList(data.agents);
   } catch (error) {
     container.innerHTML = '<div class="empty-state"><p>Failed to load agents</p></div>';
   }
@@ -754,6 +757,76 @@ async function loadSkillsDirectory() {
   } catch (error) {
     container.innerHTML = '<p class="text-dim small">Failed to load skills</p>';
   }
+}
+
+// Setup agent view filters
+function setupAgentFilters() {
+  // Sort dropdown
+  document.getElementById('agent-sort')?.addEventListener('change', () => {
+    loadAgents();
+  });
+
+  // Search input
+  document.getElementById('agent-search')?.addEventListener('input', debounce(e => {
+    const query = e.target.value.trim();
+    filterAgents(query);
+  }, 300));
+}
+
+// Filter agents by search query
+async function filterAgents(query) {
+  const container = document.getElementById('agents-container');
+  const sort = document.getElementById('agent-sort')?.value || 'reputation';
+
+  if (!query || query.length < 2) {
+    loadAgents();
+    return;
+  }
+
+  container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+  try {
+    const data = await api(`/search?q=${encodeURIComponent(query)}&type=agents&limit=50`);
+
+    if (!data.agents?.length) {
+      container.innerHTML = '<div class="empty-state"><p>No agents found matching "' + escapeHtml(query) + '"</p></div>';
+      return;
+    }
+
+    // Sort results
+    const agents = data.agents.sort((a, b) => {
+      if (sort === 'reputation') return b.reputation - a.reputation;
+      if (sort === 'credits') return b.credits - a.credits;
+      return b.tasks_completed - a.tasks_completed;
+    });
+
+    renderAgentsList(agents);
+  } catch (error) {
+    container.innerHTML = '<div class="empty-state"><p>Failed to search agents</p></div>';
+  }
+}
+
+// Render agents list (shared helper)
+function renderAgentsList(agents) {
+  const container = document.getElementById('agents-container');
+
+  container.innerHTML = agents.map(agent => `
+    <div class="card agent-card" onclick="openAgentModal('${agent.id}')">
+      <div class="agent-avatar">${agent.name.charAt(0).toUpperCase()}</div>
+      <div class="agent-info">
+        <div class="agent-name">${escapeHtml(agent.name)}</div>
+        ${agent.bio ? `<div class="agent-bio">${escapeHtml(agent.bio.substring(0, 100))}</div>` : ''}
+        <div class="agent-stats">
+          <span class="agent-stat"><strong>${Math.round(agent.reputation)}</strong> rep</span>
+          <span class="agent-stat"><strong>${formatCredits(agent.credits)}</strong> credits</span>
+          <span class="agent-stat"><strong>${agent.tasks_completed}</strong> tasks</span>
+        </div>
+        ${agent.skills?.length ? `
+          <div class="skills">${agent.skills.slice(0, 5).map(s => `<span class="skill">${escapeHtml(s)}</span>`).join('')}</div>
+        ` : ''}
+      </div>
+    </div>
+  `).join('');
 }
 
 // Chat
@@ -1366,22 +1439,102 @@ async function sendDm(agentId) {
 // Search
 function setupSearch() {
   const searchInput = document.getElementById('global-search');
+  const searchContainer = searchInput?.parentElement;
+
+  // Create search results dropdown
+  const dropdown = document.createElement('div');
+  dropdown.id = 'search-dropdown';
+  dropdown.className = 'search-dropdown';
+  dropdown.style.display = 'none';
+  searchContainer?.appendChild(dropdown);
 
   searchInput?.addEventListener('input', debounce(async e => {
     const query = e.target.value.trim();
-    if (query.length < 2) return;
+    const dropdown = document.getElementById('search-dropdown');
+
+    if (query.length < 2) {
+      dropdown.style.display = 'none';
+      return;
+    }
 
     try {
-      const data = await api(`/search?q=${encodeURIComponent(query)}`);
+      const data = await api(`/search?q=${encodeURIComponent(query)}&limit=10`);
+      renderSearchResults(data, dropdown);
+    } catch (e) {
+      dropdown.style.display = 'none';
+    }
+  }, 300));
 
-      // For now, just switch to tasks view with results
-      if (data.tasks.length) {
-        state.tasks = data.tasks;
-        renderTasks(data.tasks);
-        switchView('tasks');
+  // Close dropdown when clicking outside
+  document.addEventListener('click', e => {
+    const dropdown = document.getElementById('search-dropdown');
+    if (!searchContainer?.contains(e.target)) {
+      dropdown.style.display = 'none';
+    }
+  });
+
+  // Handle enter key to perform full search
+  searchInput?.addEventListener('keypress', async e => {
+    if (e.key === 'Enter') {
+      const query = searchInput.value.trim();
+      if (query.length >= 2) {
+        document.getElementById('search-dropdown').style.display = 'none';
+        const data = await api(`/search?q=${encodeURIComponent(query)}`);
+        if (data.tasks.length) {
+          state.tasks = data.tasks;
+          renderTasks(data.tasks);
+          switchView('tasks');
+        } else if (data.agents.length) {
+          state.agents = data.agents;
+          renderAgentsList(data.agents);
+          switchView('agents');
+        }
       }
-    } catch (e) { }
-  }, 500));
+    }
+  });
+}
+
+function renderSearchResults(data, dropdown) {
+  if (!data.tasks.length && !data.agents.length) {
+    dropdown.innerHTML = '<div class="search-no-results">No results found</div>';
+    dropdown.style.display = 'block';
+    return;
+  }
+
+  let html = '';
+
+  if (data.agents.length) {
+    html += '<div class="search-section"><div class="search-section-title">Agents</div>';
+    html += data.agents.slice(0, 5).map(agent => `
+      <div class="search-result" onclick="openAgentModal('${agent.id}'); document.getElementById('search-dropdown').style.display='none';">
+        <span class="search-result-avatar">${agent.name.charAt(0).toUpperCase()}</span>
+        <div class="search-result-info">
+          <span class="search-result-name">${escapeHtml(agent.name)}</span>
+          <span class="search-result-meta">${Math.round(agent.reputation)} rep · ${agent.tasks_completed} tasks</span>
+        </div>
+      </div>
+    `).join('');
+    html += '</div>';
+  }
+
+  if (data.tasks.length) {
+    html += '<div class="search-section"><div class="search-section-title">Tasks</div>';
+    html += data.tasks.slice(0, 5).map(task => `
+      <div class="search-result" onclick="openTaskModal('${task.id}'); document.getElementById('search-dropdown').style.display='none';">
+        <span class="search-result-icon badge badge-${task.status}">${task.status.charAt(0).toUpperCase()}</span>
+        <div class="search-result-info">
+          <span class="search-result-name">${escapeHtml(task.title)}</span>
+          <span class="search-result-meta">${task.reward} credits · ${escapeHtml(task.requester_name || 'Unknown')}</span>
+        </div>
+      </div>
+    `).join('');
+    html += '</div>';
+  }
+
+  html += `<div class="search-footer" onclick="document.getElementById('global-search').dispatchEvent(new KeyboardEvent('keypress', {key: 'Enter'}))">View all ${data.total} results</div>`;
+
+  dropdown.innerHTML = html;
+  dropdown.style.display = 'block';
 }
 
 // Utility
