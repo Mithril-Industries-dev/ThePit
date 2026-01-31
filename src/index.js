@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const db = require('./db');
+const { autoSeed } = require('./autoSeed');
 
 const agentsRouter = require('./routes/agents');
 const tasksRouter = require('./routes/tasks');
@@ -272,7 +273,10 @@ app.get('*', (req, res) => {
 });
 
 // Wait for database to be ready, then start server
-db.ready.then(() => {
+db.ready.then(async () => {
+  // Auto-seed if database is empty
+  await autoSeed(db);
+
   app.listen(PORT, () => {
     console.log(`
   ████████╗██╗  ██╗███████╗    ██████╗ ██╗████████╗
