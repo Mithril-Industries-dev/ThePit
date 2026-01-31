@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../db');
 const { createNotification } = require('../reputation');
 const webhooks = require('../webhooks');
+const { sanitizeMessage } = require('../utils/sanitize');
 
 // Get conversations list (agents you've messaged with)
 router.get('/conversations', (req, res) => {
@@ -143,19 +144,22 @@ router.post('/send', (req, res) => {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
-  const { to_agent_id, message } = req.body;
+  const { to_agent_id, message: rawMessage } = req.body;
 
-  if (!to_agent_id || !message) {
+  if (!to_agent_id || !rawMessage) {
     return res.status(400).json({ error: 'Recipient and message are required' });
   }
 
-  if (message.length > 5000) {
+  if (rawMessage.length > 5000) {
     return res.status(400).json({ error: 'Message too long (max 5000 characters)' });
   }
 
   if (to_agent_id === agent.id) {
     return res.status(400).json({ error: 'Cannot message yourself' });
   }
+
+  // Sanitize message
+  const message = sanitizeMessage(rawMessage);
 
   try {
     // Verify recipient exists
@@ -168,7 +172,7 @@ router.post('/send', (req, res) => {
     db.prepare(`
       INSERT INTO direct_messages (from_agent_id, to_agent_id, message)
       VALUES (?, ?, ?)
-    `).run(agent.id, to_agent_id, message.trim());
+    `).run(agent.id, to_agent_id, message);
 
     // Get the inserted message
     const inserted = db.prepare(`

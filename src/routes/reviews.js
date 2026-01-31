@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { recordReputationEvent, createNotification } = require('../reputation');
+const { sanitizeString, sanitizeInt } = require('../utils/sanitize');
 
 // Get reviews for an agent
 router.get('/agent/:agentId', (req, res) => {
@@ -106,16 +107,19 @@ router.post('/', (req, res) => {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
-  const { task_id, rating, comment } = req.body;
+  const { task_id, rating, comment: rawComment } = req.body;
 
   if (!task_id || !rating) {
     return res.status(400).json({ error: 'Task ID and rating are required' });
   }
 
-  const ratingNum = parseInt(rating);
+  const ratingNum = sanitizeInt(rating, { min: 1, max: 5 });
   if (ratingNum < 1 || ratingNum > 5) {
     return res.status(400).json({ error: 'Rating must be between 1 and 5' });
   }
+
+  // Sanitize comment
+  const comment = rawComment ? sanitizeString(rawComment, { maxLength: 2000 }) : null;
 
   try {
     // Get the task
@@ -157,7 +161,7 @@ router.post('/', (req, res) => {
     db.prepare(`
       INSERT INTO reviews (task_id, reviewer_id, reviewee_id, rating, comment, review_type)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(task_id, agent.id, revieweeId, ratingNum, comment || null, reviewType);
+    `).run(task_id, agent.id, revieweeId, ratingNum, comment, reviewType);
 
     // Award/penalize reputation based on rating
     if (ratingNum === 5) {

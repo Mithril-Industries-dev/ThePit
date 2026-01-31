@@ -5,6 +5,7 @@ const { nanoid } = require('nanoid');
 const webhooks = require('../webhooks');
 const { recordReputationEvent, createNotification, checkAndAwardBadges } = require('../reputation');
 const { recordTransaction } = require('./transactions');
+const { sanitizeTitle, sanitizeDescription, sanitizeSkills, sanitizeProof, sanitizeInt } = require('../utils/sanitize');
 
 // Helper to log task events
 function logTaskEvent(taskId, agentId, action, details = null) {
@@ -38,8 +39,10 @@ router.get('/', (req, res) => {
   }
 
   if (skill) {
+    // Sanitize skill parameter to prevent injection in LIKE pattern
+    const sanitizedSkill = skill.replace(/[%_"\\]/g, '');
     query += ' AND t.required_skills LIKE ?';
-    params.push(`%"${skill}"%`);
+    params.push(`%"${sanitizedSkill}"%`);
   }
 
   if (min_reward) {
@@ -83,8 +86,9 @@ router.get('/', (req, res) => {
     countParams.push(...statuses);
   }
   if (skill) {
+    const sanitizedSkill = skill.replace(/[%_"\\]/g, '');
     countQuery += ' AND t.required_skills LIKE ?';
-    countParams.push(`%"${skill}"%`);
+    countParams.push(`%"${sanitizedSkill}"%`);
   }
   if (min_reward) {
     countQuery += ' AND t.reward >= ?';
@@ -165,10 +169,32 @@ router.post('/', (req, res) => {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
-  const { title, description, reward, required_skills, proof_required, deadline } = req.body;
+  const {
+    title: rawTitle,
+    description: rawDescription,
+    reward: rawReward,
+    required_skills: rawSkills,
+    proof_required: rawProofRequired,
+    deadline
+  } = req.body;
 
-  if (!title || !description || !reward) {
+  if (!rawTitle || !rawDescription || !rawReward) {
     return res.status(400).json({ error: 'Title, description, and reward are required' });
+  }
+
+  // Sanitize inputs
+  const title = sanitizeTitle(rawTitle);
+  const description = sanitizeDescription(rawDescription);
+  const reward = sanitizeInt(rawReward, { min: 1, max: 1000000 });
+  const required_skills = sanitizeSkills(rawSkills || []);
+  const proof_required = ['text', 'url', 'file'].includes(rawProofRequired) ? rawProofRequired : 'text';
+
+  if (!title || title.length < 1) {
+    return res.status(400).json({ error: 'Valid title is required' });
+  }
+
+  if (!description || description.length < 1) {
+    return res.status(400).json({ error: 'Valid description is required' });
   }
 
   if (reward < 1) {
@@ -180,7 +206,7 @@ router.post('/', (req, res) => {
   }
 
   const id = `task_${nanoid(12)}`;
-  const skillsJson = JSON.stringify(required_skills || []);
+  const skillsJson = JSON.stringify(required_skills);
 
   // Deduct credits from requester (escrow)
   const updateCredits = db.prepare('UPDATE agents SET credits = credits - ?, tasks_posted = tasks_posted + 1 WHERE id = ?');
@@ -191,7 +217,7 @@ router.post('/', (req, res) => {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  stmt.run(id, title, description, agent.id, reward, skillsJson, proof_required || 'text', deadline || null);
+  stmt.run(id, title, description, agent.id, reward, skillsJson, proof_required, deadline || null);
 
   logTaskEvent(id, agent.id, 'created', `Reward: ${reward} credits`);
 
@@ -210,8 +236,8 @@ router.post('/', (req, res) => {
     description,
     requester_id: agent.id,
     reward,
-    required_skills: required_skills || [],
-    proof_required: proof_required || 'text',
+    required_skills,
+    proof_required,
     deadline,
     status: 'open',
     message: 'Task posted. Credits escrowed.'
@@ -282,10 +308,13 @@ router.post('/:id/submit', (req, res) => {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
-  const { proof } = req.body;
-  if (!proof) {
+  const { proof: rawProof } = req.body;
+  if (!rawProof) {
     return res.status(400).json({ error: 'Proof of completion required' });
   }
+
+  // Sanitize proof
+  const proof = sanitizeProof(rawProof);
 
   const stmt = db.prepare('SELECT * FROM tasks WHERE id = ?');
   const task = stmt.get(req.params.id);
@@ -303,11 +332,11 @@ router.post('/:id/submit', (req, res) => {
   }
 
   const update = db.prepare(`
-    UPDATE tasks 
+    UPDATE tasks
     SET status = 'submitted', proof_submitted = ?, submitted_at = datetime('now')
     WHERE id = ?
   `);
-  
+
   update.run(proof, req.params.id);
 
   logTaskEvent(req.params.id, agent.id, 'submitted', proof.substring(0, 200));
@@ -574,8 +603,10 @@ router.get('/recommended/for-me', (req, res) => {
 
     if (skills.length > 0) {
       // Build query to match any of the agent's skills
-      const skillConditions = skills.map(s => `t.required_skills LIKE ?`).join(' OR ');
-      const skillParams = skills.map(s => `%"${s.toLowerCase()}"%`);
+      // Sanitize skills to prevent LIKE injection
+      const sanitizedSkills = skills.map(s => s.replace(/[%_"\\]/g, '').toLowerCase());
+      const skillConditions = sanitizedSkills.map(() => `t.required_skills LIKE ?`).join(' OR ');
+      const skillParams = sanitizedSkills.map(s => `%"${s}"%`);
 
       tasks = db.prepare(`
         SELECT t.*, req.name as requester_name, req.reputation as requester_reputation

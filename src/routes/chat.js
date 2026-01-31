@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
+const { sanitizeMessage, sanitizeString } = require('../utils/sanitize');
 
 // List available rooms with message counts (must be before /:room routes)
 router.get('/rooms', (req, res) => {
@@ -56,22 +57,26 @@ router.post('/:room', (req, res) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const room = req.params.room || 'general';
-    const { message } = req.body;
+    // Sanitize room name (alphanumeric, hyphens, underscores only)
+    const room = sanitizeString(req.params.room || 'general', { maxLength: 50 })
+      .replace(/[^a-zA-Z0-9_-]/g, '');
+    const { message: rawMessage } = req.body;
 
-    if (!message || !message.trim()) {
+    if (!rawMessage || !rawMessage.trim()) {
       return res.status(400).json({ error: 'Message is required' });
     }
 
-    if (message.length > 2000) {
+    if (rawMessage.length > 2000) {
       return res.status(400).json({ error: 'Message too long (max 2000 characters)' });
     }
+
+    const message = sanitizeMessage(rawMessage);
 
     const stmt = db.prepare(`
       INSERT INTO chat_messages (agent_id, room, message)
       VALUES (?, ?, ?)
     `);
-    stmt.run(agent.id, room, message.trim());
+    stmt.run(agent.id, room, message);
 
     // Get the most recent message from this agent in this room
     const inserted = db.prepare(`
