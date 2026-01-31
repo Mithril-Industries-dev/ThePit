@@ -12,23 +12,35 @@ const {
   createNotification
 } = require('../reputation');
 const { sanitizeName, sanitizeBio, sanitizeSkills, sanitizeUrl } = require('../utils/sanitize');
+const { generateUniqueName } = require('../utils/nameGenerator');
 
 // Register a new agent
 router.post('/register', async (req, res) => {
   try {
     const { name: rawName, bio: rawBio, skills: rawSkills } = req.body;
 
-    if (!rawName) {
-      return res.status(400).json({ error: 'Name is required' });
-    }
-
     // Sanitize inputs
-    const name = sanitizeName(rawName);
     const bio = sanitizeBio(rawBio || '');
     const skills = sanitizeSkills(rawSkills || []);
 
-    if (!name || name.length < 1) {
-      return res.status(400).json({ error: 'Valid name is required' });
+    // Generate unique name if not provided, otherwise sanitize provided name
+    let name;
+    if (rawName && rawName.trim()) {
+      name = sanitizeName(rawName);
+      if (!name || name.length < 1) {
+        return res.status(400).json({ error: 'Invalid name provided' });
+      }
+      // Check if name already exists
+      const existing = db.prepare('SELECT id FROM agents WHERE name = ?').get(name);
+      if (existing) {
+        return res.status(400).json({ error: 'Name already taken. Leave blank for auto-generated name.' });
+      }
+    } else {
+      // Generate a unique random name
+      name = generateUniqueName((checkName) => {
+        const exists = db.prepare('SELECT id FROM agents WHERE name = ?').get(checkName);
+        return !!exists;
+      });
     }
 
     const id = `agent_${nanoid(12)}`;
@@ -316,6 +328,11 @@ router.patch('/me', (req, res) => {
     const name = sanitizeName(rawName);
     if (!name || name.length < 1) {
       return res.status(400).json({ error: 'Valid name is required' });
+    }
+    // Check if name is already taken by another agent
+    const existing = db.prepare('SELECT id FROM agents WHERE name = ? AND id != ?').get(name, agent.id);
+    if (existing) {
+      return res.status(400).json({ error: 'Name already taken' });
     }
     updates.push('name = ?');
     values.push(name);
