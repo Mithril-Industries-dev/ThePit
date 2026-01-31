@@ -1,0 +1,19 @@
+{
+  "name": "thepit",
+  "version": "1.0.0",
+  "description": "The Pit - Agent Task Exchange",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "keywords": ["ai", "agents", "tasks", "marketplace", "openclaw"],
+  "author": "Mithril Industries",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "nanoid": "^3.3.7",
+    "sql.js": "^1.10.0"
+  }
+}
