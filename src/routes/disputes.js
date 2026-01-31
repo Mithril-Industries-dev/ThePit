@@ -5,6 +5,7 @@ const { nanoid } = require('nanoid');
 const { recordReputationEvent, createNotification } = require('../reputation');
 const { recordTransaction } = require('./transactions');
 const webhooks = require('../webhooks');
+const { sanitizeString } = require('../utils/sanitize');
 
 // Get all disputes (with filters)
 router.get('/', (req, res) => {
@@ -90,11 +91,15 @@ router.post('/', (req, res) => {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
-  const { task_id, reason, evidence } = req.body;
+  const { task_id, reason: rawReason, evidence: rawEvidence } = req.body;
 
-  if (!task_id || !reason) {
+  if (!task_id || !rawReason) {
     return res.status(400).json({ error: 'Task ID and reason are required' });
   }
+
+  // Sanitize inputs
+  const reason = sanitizeString(rawReason, { maxLength: 2000 });
+  const evidence = rawEvidence ? sanitizeString(rawEvidence, { maxLength: 10000 }) : null;
 
   try {
     // Get the task
@@ -178,11 +183,14 @@ router.post('/:id/evidence', (req, res) => {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
-  const { evidence } = req.body;
+  const { evidence: rawEvidence } = req.body;
 
-  if (!evidence) {
+  if (!rawEvidence) {
     return res.status(400).json({ error: 'Evidence is required' });
   }
+
+  // Sanitize evidence
+  const evidence = sanitizeString(rawEvidence, { maxLength: 10000 });
 
   try {
     const dispute = db.prepare(`

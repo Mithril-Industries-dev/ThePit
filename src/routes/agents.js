@@ -11,26 +11,36 @@ const {
   calculateTrustScore,
   createNotification
 } = require('../reputation');
+const { sanitizeName, sanitizeBio, sanitizeSkills, sanitizeUrl } = require('../utils/sanitize');
 
 // Register a new agent
 router.post('/register', async (req, res) => {
   try {
-    const { name, bio, skills } = req.body;
-    
-    if (!name) {
+    const { name: rawName, bio: rawBio, skills: rawSkills } = req.body;
+
+    if (!rawName) {
       return res.status(400).json({ error: 'Name is required' });
+    }
+
+    // Sanitize inputs
+    const name = sanitizeName(rawName);
+    const bio = sanitizeBio(rawBio || '');
+    const skills = sanitizeSkills(rawSkills || []);
+
+    if (!name || name.length < 1) {
+      return res.status(400).json({ error: 'Valid name is required' });
     }
 
     const id = `agent_${nanoid(12)}`;
     const api_key = `pit_${nanoid(32)}`;
-    const skillsJson = JSON.stringify(skills || []);
+    const skillsJson = JSON.stringify(skills);
 
     const stmt = db.prepare(`
       INSERT INTO agents (id, name, api_key, bio, skills)
       VALUES (?, ?, ?, ?, ?)
     `);
-    
-    stmt.run(id, name, api_key, bio || '', skillsJson);
+
+    stmt.run(id, name, api_key, bio, skillsJson);
 
     // Award newcomer badge
     checkAndAwardBadges(id);
@@ -87,26 +97,23 @@ router.put('/me/webhook', (req, res) => {
     return res.status(401).json({ error: 'Not authenticated' });
   }
 
-  const { webhook_url } = req.body;
+  const { webhook_url: rawUrl } = req.body;
 
-  // Validate URL if provided
-  if (webhook_url) {
-    try {
-      const url = new URL(webhook_url);
-      if (!['http:', 'https:'].includes(url.protocol)) {
-        return res.status(400).json({ error: 'Webhook URL must use HTTP or HTTPS' });
-      }
-    } catch (e) {
-      return res.status(400).json({ error: 'Invalid webhook URL' });
+  // Sanitize and validate URL if provided
+  let webhookUrl = null;
+  if (rawUrl) {
+    webhookUrl = sanitizeUrl(rawUrl);
+    if (!webhookUrl) {
+      return res.status(400).json({ error: 'Invalid webhook URL. Must be a valid HTTP or HTTPS URL.' });
     }
   }
 
   const stmt = db.prepare('UPDATE agents SET webhook_url = ? WHERE id = ?');
-  stmt.run(webhook_url || null, agent.id);
+  stmt.run(webhookUrl, agent.id);
 
   res.json({
-    message: webhook_url ? 'Webhook URL set' : 'Webhook URL removed',
-    webhook_url: webhook_url || null
+    message: webhookUrl ? 'Webhook URL set' : 'Webhook URL removed',
+    webhook_url: webhookUrl
   });
 });
 
@@ -300,22 +307,26 @@ router.patch('/me', (req, res) => {
     return res.status(401).json({ error: 'Not authenticated' });
   }
 
-  const { name, bio, skills } = req.body;
-  
+  const { name: rawName, bio: rawBio, skills: rawSkills } = req.body;
+
   const updates = [];
   const values = [];
 
-  if (name) {
+  if (rawName) {
+    const name = sanitizeName(rawName);
+    if (!name || name.length < 1) {
+      return res.status(400).json({ error: 'Valid name is required' });
+    }
     updates.push('name = ?');
     values.push(name);
   }
-  if (bio !== undefined) {
+  if (rawBio !== undefined) {
     updates.push('bio = ?');
-    values.push(bio);
+    values.push(sanitizeBio(rawBio));
   }
-  if (skills) {
+  if (rawSkills) {
     updates.push('skills = ?');
-    values.push(JSON.stringify(skills));
+    values.push(JSON.stringify(sanitizeSkills(rawSkills)));
   }
 
   if (updates.length === 0) {
@@ -323,13 +334,13 @@ router.patch('/me', (req, res) => {
   }
 
   values.push(agent.id);
-  
+
   const stmt = db.prepare(`
     UPDATE agents SET ${updates.join(', ')} WHERE id = ?
   `);
-  
+
   stmt.run(...values);
-  
+
   res.json({ message: 'Profile updated' });
 });
 
