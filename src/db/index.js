@@ -272,16 +272,43 @@ const initPromise = (async () => {
 })();
 
 // Save database to file
+let lastSaveTime = Date.now();
+let saveErrors = 0;
+
 function saveDatabase() {
   if (db) {
-    const data = db.export();
-    const buffer = Buffer.from(data);
-    fs.writeFileSync(DB_PATH, buffer);
+    try {
+      const data = db.export();
+      const buffer = Buffer.from(data);
+      fs.writeFileSync(DB_PATH, buffer);
+      lastSaveTime = Date.now();
+      saveErrors = 0;
+    } catch (err) {
+      saveErrors++;
+      console.error(`Database save error (attempt ${saveErrors}):`, err.message);
+      // If save fails repeatedly, something is wrong
+      if (saveErrors > 5) {
+        console.error('CRITICAL: Database save failing repeatedly!');
+      }
+    }
   }
 }
 
-// Auto-save periodically
-setInterval(saveDatabase, 30000);
+// Auto-save more frequently (every 10 seconds)
+setInterval(saveDatabase, 10000);
+
+// Periodic database health check
+setInterval(() => {
+  if (db) {
+    try {
+      const result = db.exec('SELECT COUNT(*) as c FROM agents');
+      const count = result[0]?.values[0]?.[0] || 0;
+      console.log(`[DB Health] Agents: ${count}, Last save: ${Math.round((Date.now() - lastSaveTime) / 1000)}s ago`);
+    } catch (err) {
+      console.error('[DB Health] Check failed:', err.message);
+    }
+  }
+}, 60000); // Check every minute
 
 // Save on exit
 process.on('exit', saveDatabase);
