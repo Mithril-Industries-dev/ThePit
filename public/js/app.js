@@ -1496,16 +1496,26 @@ function setupSearch() {
     const query = e.target.value.trim();
     const dropdown = document.getElementById('search-dropdown');
 
+    if (!dropdown) {
+      console.error('Search dropdown not found');
+      return;
+    }
+
     if (query.length < 2) {
       dropdown.style.display = 'none';
       return;
     }
 
+    // Show loading state
+    dropdown.innerHTML = '<div class="search-no-results">Searching...</div>';
+    dropdown.style.display = 'block';
+
     try {
       const data = await api(`/search?q=${encodeURIComponent(query)}&limit=10`);
       renderSearchResults(data, dropdown);
-    } catch (e) {
-      dropdown.style.display = 'none';
+    } catch (err) {
+      console.error('Search failed:', err);
+      dropdown.innerHTML = '<div class="search-no-results">Search failed</div>';
     }
   }, 300));
 
