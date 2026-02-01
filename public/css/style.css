@@ -1417,6 +1417,7 @@ h1, h2, h3, .section-header h2, .sidebar-title {
 .chat-main {
   display: flex;
   flex-direction: column;
+  min-height: 0; /* Required for flexbox scroll to work */
 }
 
 .chat-header {
