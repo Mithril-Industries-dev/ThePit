@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
 const path = require('path');
 const db = require('./db');
 const { autoSeed } = require('./autoSeed');
@@ -28,38 +27,16 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'"],
-      fontSrc: ["'self'"],
+      connectSrc: ["'self'", "https:"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"]
     }
   },
   crossOriginEmbedderPolicy: false // Allow loading resources
 }));
-
-// Rate limiting - general API limit
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // 100 requests per window per IP
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests, please try again later.' }
-});
-
-// Stricter rate limit for auth-related endpoints
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // 10 registration attempts per window
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many registration attempts, please try again later.' }
-});
-
-// Apply rate limiting to API routes
-app.use('/api/', apiLimiter);
-app.use('/api/agents/register', authLimiter);
 
 // Middleware
 app.use(cors());
