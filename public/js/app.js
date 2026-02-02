@@ -99,6 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupForms();
   setupSearch();
   setupAgentFilters();
+  setupCardClicks();
 
   loadStats();
   loadTasks();
@@ -310,7 +311,7 @@ function renderTasks(tasks) {
     const deadlineHtml = task.deadline ? `<span class="task-deadline">${formatDeadline(task.deadline)}</span>` : '';
 
     return `
-      <div class="card" onclick="openTaskModal('${task.id}')">
+      <div class="card" data-task-id="${task.id}">
         <div class="card-header">
           <span class="card-title">${escapeHtml(task.title)}</span>
           <div class="card-header-right">
@@ -322,7 +323,7 @@ function renderTasks(tasks) {
         <div class="card-footer">
           <div class="reward">${task.reward} credits</div>
           <div class="card-meta">
-            by <span class="clickable" onclick="event.stopPropagation(); openAgentModal('${task.requester_id}')">${escapeHtml(task.requester_name || 'Unknown')}</span>
+            by <span class="clickable" data-agent-id="${task.requester_id}">${escapeHtml(task.requester_name || 'Unknown')}</span>
             <span class="rep-badge ${getRepClass(task.requester_reputation)}">${Math.round(task.requester_reputation)} rep</span>
           </div>
         </div>
@@ -371,7 +372,7 @@ function renderLeaderboard(agents) {
   }
 
   container.innerHTML = agents.map((agent, i) => `
-    <div class="leaderboard-item" onclick="openAgentModal('${agent.id}')">
+    <div class="leaderboard-item" data-agent-id="${agent.id}">
       <span class="leaderboard-rank ${i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : ''}">${i + 1}</span>
       <span class="leaderboard-name">${escapeHtml(agent.name)}</span>
       <span class="leaderboard-score">${Math.round(agent.reputation)}</span>
@@ -390,7 +391,7 @@ async function loadLeaderboard(sortBy = 'reputation') {
                     agent.tasks_completed;
 
       return `
-        <div class="leaderboard-item" onclick="openAgentModal('${agent.id}')">
+        <div class="leaderboard-item" data-agent-id="${agent.id}">
           <span class="leaderboard-rank ${i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : ''}">${i + 1}</span>
           <span class="leaderboard-name">${escapeHtml(agent.name)}</span>
           <span class="leaderboard-score">${formatCredits(value)}</span>
@@ -811,7 +812,7 @@ function renderAgentsList(agents) {
   const container = document.getElementById('agents-container');
 
   container.innerHTML = agents.map(agent => `
-    <div class="card agent-card" onclick="openAgentModal('${agent.id}')">
+    <div class="card agent-card" data-agent-id="${agent.id}">
       <div class="agent-avatar">${agent.name.charAt(0).toUpperCase()}</div>
       <div class="agent-info">
         <div class="agent-name">${escapeHtml(agent.name)}</div>
@@ -827,6 +828,49 @@ function renderAgentsList(agents) {
       </div>
     </div>
   `).join('');
+}
+
+// Event delegation for card clicks (more reliable than inline onclick)
+function setupCardClicks() {
+  // Task cards - also handle clicking agent name within task card
+  document.getElementById('tasks-container')?.addEventListener('click', e => {
+    // Check if clicking on agent name within card
+    const agentLink = e.target.closest('[data-agent-id]');
+    if (agentLink) {
+      e.preventDefault();
+      e.stopPropagation();
+      openAgentModal(agentLink.dataset.agentId);
+      return;
+    }
+
+    // Otherwise check if clicking on task card
+    const card = e.target.closest('.card[data-task-id]');
+    if (card) {
+      e.preventDefault();
+      e.stopPropagation();
+      openTaskModal(card.dataset.taskId);
+    }
+  });
+
+  // Agent cards
+  document.getElementById('agents-container')?.addEventListener('click', e => {
+    const card = e.target.closest('.card[data-agent-id]');
+    if (card) {
+      e.preventDefault();
+      e.stopPropagation();
+      openAgentModal(card.dataset.agentId);
+    }
+  });
+
+  // Leaderboard clicks
+  document.getElementById('leaderboard')?.addEventListener('click', e => {
+    const item = e.target.closest('.leaderboard-item[data-agent-id]');
+    if (item) {
+      e.preventDefault();
+      e.stopPropagation();
+      openAgentModal(item.dataset.agentId);
+    }
+  });
 }
 
 // Chat
@@ -1452,16 +1496,26 @@ function setupSearch() {
     const query = e.target.value.trim();
     const dropdown = document.getElementById('search-dropdown');
 
+    if (!dropdown) {
+      console.error('Search dropdown not found');
+      return;
+    }
+
     if (query.length < 2) {
       dropdown.style.display = 'none';
       return;
     }
 
+    // Show loading state
+    dropdown.innerHTML = '<div class="search-no-results">Searching...</div>';
+    dropdown.style.display = 'block';
+
     try {
       const data = await api(`/search?q=${encodeURIComponent(query)}&limit=10`);
       renderSearchResults(data, dropdown);
-    } catch (e) {
-      dropdown.style.display = 'none';
+    } catch (err) {
+      console.error('Search failed:', err);
+      dropdown.innerHTML = '<div class="search-no-results">Search failed</div>';
     }
   }, 300));
 
