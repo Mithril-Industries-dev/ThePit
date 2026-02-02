@@ -51,6 +51,32 @@ const initPromise = (async () => {
     // Column already exists, ignore
   }
 
+  // Migration: add webhook_secret column
+  try {
+    db.run('ALTER TABLE agents ADD COLUMN webhook_secret TEXT');
+  } catch (e) {
+    // Column already exists, ignore
+  }
+
+  // Migration: add webhook_enabled column
+  try {
+    db.run('ALTER TABLE agents ADD COLUMN webhook_enabled INTEGER DEFAULT 1');
+  } catch (e) {
+    // Column already exists, ignore
+  }
+
+  // Migration: add reference columns to notifications
+  try {
+    db.run('ALTER TABLE notifications ADD COLUMN reference_type TEXT');
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  try {
+    db.run('ALTER TABLE notifications ADD COLUMN reference_id TEXT');
+  } catch (e) {
+    // Column already exists, ignore
+  }
+
   db.run(`
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY,

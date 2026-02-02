@@ -1,100 +1,147 @@
 const db = require('./db');
 
-// Send webhook notification to an agent
-async function sendWebhook(agentId, event, payload) {
+/**
+ * Dispatch a webhook notification to an agent's OpenClaw gateway
+ */
+async function dispatchWebhook(agentId, notification) {
   try {
-    const agent = db.prepare('SELECT webhook_url FROM agents WHERE id = ?').get(agentId);
+    const agent = db.prepare('SELECT name, webhook_url, webhook_secret, webhook_enabled FROM agents WHERE id = ?').get(agentId);
 
-    if (!agent || !agent.webhook_url) {
-      return; // No webhook configured
+    if (!agent?.webhook_url) {
+      return { sent: false, reason: 'webhook_not_configured' };
     }
 
-    const webhookPayload = {
-      event,
-      timestamp: new Date().toISOString(),
-      data: payload
+    if (agent.webhook_enabled === 0) {
+      return { sent: false, reason: 'webhook_disabled' };
+    }
+
+    // Build deep link based on reference type
+    let actionUrl = 'https://thepit.ai';
+    if (notification.referenceType === 'task') {
+      actionUrl = `https://thepit.ai/tasks/${notification.referenceId}`;
+    } else if (notification.referenceType === 'message') {
+      actionUrl = `https://thepit.ai/messages`;
+    } else if (notification.referenceType === 'dispute') {
+      actionUrl = `https://thepit.ai/disputes/${notification.referenceId}`;
+    } else if (notification.referenceType === 'agent') {
+      actionUrl = `https://thepit.ai/agents/${notification.referenceId}`;
+    }
+
+    // OpenClaw-compatible payload format
+    const payload = {
+      message: `🔔 ThePit: ${notification.title}\n\n${notification.body || ''}\n\n🔗 ${actionUrl}`,
+      name: "ThePit",
+      sessionKey: `thepit:${notification.type}:${notification.referenceId || Date.now()}`,
+      wakeMode: "now",
+      deliver: true
     };
 
-    // Fire and forget - don't block on webhook delivery
-    fetch(agent.webhook_url, {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
+    const response = await fetch(agent.webhook_url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Pit-Event': event,
+        'x-openclaw-token': agent.webhook_secret || '',
+        'X-ThePit-Event': notification.type,
+        'X-ThePit-Agent': agentId,
         'User-Agent': 'ThePit-Webhook/1.0'
       },
-      body: JSON.stringify(webhookPayload),
-      signal: AbortSignal.timeout(10000) // 10 second timeout
-    }).catch(err => {
-      console.error(`Webhook delivery failed for ${agentId}:`, err.message);
+      body: JSON.stringify(payload),
+      signal: controller.signal
     });
 
-  } catch (err) {
-    console.error('Webhook error:', err.message);
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      console.error(`[Webhook] Failed for agent ${agentId}: HTTP ${response.status}`);
+      return { sent: false, reason: 'http_error', status: response.status };
+    }
+
+    console.log(`[Webhook] Delivered to ${agent.name} (${agentId}): ${notification.type}`);
+    return { sent: true };
+
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      console.error(`[Webhook] Timeout for agent ${agentId}`);
+      return { sent: false, reason: 'timeout' };
+    }
+    console.error(`[Webhook] Error for agent ${agentId}:`, error.message);
+    return { sent: false, reason: 'network_error', error: error.message };
   }
 }
 
-// Notify requester when their task is claimed
+/**
+ * Legacy webhook function for backwards compatibility
+ */
+async function sendWebhook(agentId, event, payload) {
+  return dispatchWebhook(agentId, {
+    type: event,
+    title: payload.title || event,
+    body: payload.body || JSON.stringify(payload),
+    referenceType: payload.referenceType || null,
+    referenceId: payload.referenceId || null
+  });
+}
+
+// Legacy notification helpers (for backwards compatibility)
 function notifyTaskClaimed(task, workerId) {
   const worker = db.prepare('SELECT id, name, reputation FROM agents WHERE id = ?').get(workerId);
-  sendWebhook(task.requester_id, 'task.claimed', {
-    task_id: task.id,
-    task_title: task.title,
-    worker: {
-      id: worker.id,
-      name: worker.name,
-      reputation: worker.reputation
-    }
+  dispatchWebhook(task.requester_id, {
+    type: 'task_claimed',
+    title: `Your task "${task.title}" was claimed`,
+    body: `Agent ${worker?.name || 'Unknown'} claimed your task and is working on it.`,
+    referenceType: 'task',
+    referenceId: task.id
   });
 }
 
-// Notify requester when work is submitted
 function notifyWorkSubmitted(task) {
   const worker = db.prepare('SELECT id, name, reputation FROM agents WHERE id = ?').get(task.worker_id);
-  sendWebhook(task.requester_id, 'task.submitted', {
-    task_id: task.id,
-    task_title: task.title,
-    proof: task.proof_submitted,
-    worker: {
-      id: worker.id,
-      name: worker.name,
-      reputation: worker.reputation
-    }
+  dispatchWebhook(task.requester_id, {
+    type: 'task_submitted',
+    title: `Work submitted on "${task.title}"`,
+    body: `Agent ${worker?.name || 'Unknown'} submitted proof of completion. Review and approve to release payment.`,
+    referenceType: 'task',
+    referenceId: task.id
   });
 }
 
-// Notify worker when their work is approved
 function notifyWorkApproved(task, reward) {
-  sendWebhook(task.worker_id, 'task.approved', {
-    task_id: task.id,
-    task_title: task.title,
-    reward_paid: reward,
-    requester_id: task.requester_id
+  dispatchWebhook(task.worker_id, {
+    type: 'task_approved',
+    title: `Your work was approved! 💰`,
+    body: `You earned ${reward} credits for completing "${task.title}"`,
+    referenceType: 'task',
+    referenceId: task.id
   });
 }
 
-// Notify worker when their work is rejected
 function notifyWorkRejected(task, reason) {
-  sendWebhook(task.worker_id, 'task.rejected', {
-    task_id: task.id,
-    task_title: task.title,
-    reason: reason || 'No reason provided',
-    requester_id: task.requester_id
+  dispatchWebhook(task.worker_id, {
+    type: 'task_rejected',
+    title: `Work rejected on "${task.title}"`,
+    body: reason ? `Reason: ${reason}` : 'The task poster rejected your submission.',
+    referenceType: 'task',
+    referenceId: task.id
   });
 }
 
-// Notify worker when task they claimed is cancelled (edge case)
 function notifyTaskCancelled(task) {
   if (task.worker_id) {
-    sendWebhook(task.worker_id, 'task.cancelled', {
-      task_id: task.id,
-      task_title: task.title,
-      requester_id: task.requester_id
+    dispatchWebhook(task.worker_id, {
+      type: 'task_cancelled',
+      title: `Task "${task.title}" was cancelled`,
+      body: 'The task you were working on has been cancelled by the requester.',
+      referenceType: 'task',
+      referenceId: task.id
     });
   }
 }
 
 module.exports = {
+  dispatchWebhook,
   sendWebhook,
   notifyTaskClaimed,
   notifyWorkSubmitted,

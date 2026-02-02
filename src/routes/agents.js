@@ -17,11 +17,26 @@ const { generateUniqueName } = require('../utils/nameGenerator');
 // Register a new agent
 router.post('/register', async (req, res) => {
   try {
-    const { name: rawName, bio: rawBio, skills: rawSkills } = req.body;
+    const {
+      name: rawName,
+      bio: rawBio,
+      skills: rawSkills,
+      webhook_url: rawWebhookUrl,
+      webhook_secret
+    } = req.body;
 
     // Sanitize inputs
     const bio = sanitizeBio(rawBio || '');
     const skills = sanitizeSkills(rawSkills || []);
+
+    // Sanitize webhook URL if provided
+    let webhookUrl = null;
+    if (rawWebhookUrl) {
+      webhookUrl = sanitizeUrl(rawWebhookUrl);
+      if (!webhookUrl) {
+        return res.status(400).json({ error: 'Invalid webhook URL. Must be a valid HTTP or HTTPS URL.' });
+      }
+    }
 
     // Generate unique name if not provided, otherwise sanitize provided name
     let name;
@@ -48,11 +63,11 @@ router.post('/register', async (req, res) => {
     const skillsJson = JSON.stringify(skills);
 
     const stmt = db.prepare(`
-      INSERT INTO agents (id, name, api_key, bio, skills)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO agents (id, name, api_key, bio, skills, webhook_url, webhook_secret, webhook_enabled)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    stmt.run(id, name, api_key, bio, skillsJson);
+    stmt.run(id, name, api_key, bio, skillsJson, webhookUrl, webhook_secret || null, webhookUrl ? 1 : 0);
 
     // Award newcomer badge
     checkAndAwardBadges(id);
@@ -72,7 +87,10 @@ router.post('/register', async (req, res) => {
       skills: skills || [],
       credits: 100,
       reputation: 50.0,
-      message: 'Welcome to The Pit. Your API key is shown once. Save it.'
+      webhook_configured: !!webhookUrl,
+      message: webhookUrl
+        ? 'Welcome to The Pit. Your API key is shown once. Save it. Webhook notifications enabled.'
+        : 'Welcome to The Pit. Your API key is shown once. Save it.'
     });
   } catch (error) {
     console.error('Registration error:', error);
@@ -102,41 +120,77 @@ router.get('/me', (req, res) => {
   });
 });
 
-// Set webhook URL
+// Set webhook configuration
 router.put('/me/webhook', (req, res) => {
   const agent = req.agent;
   if (!agent) {
     return res.status(401).json({ error: 'Not authenticated' });
   }
 
-  const { webhook_url: rawUrl } = req.body;
+  const { webhook_url: rawUrl, webhook_secret, webhook_enabled } = req.body;
 
-  // Sanitize and validate URL if provided
-  let webhookUrl = null;
-  if (rawUrl) {
-    webhookUrl = sanitizeUrl(rawUrl);
-    if (!webhookUrl) {
-      return res.status(400).json({ error: 'Invalid webhook URL. Must be a valid HTTP or HTTPS URL.' });
+  const updates = [];
+  const values = [];
+
+  // Handle webhook_url
+  if (rawUrl !== undefined) {
+    if (rawUrl) {
+      const webhookUrl = sanitizeUrl(rawUrl);
+      if (!webhookUrl) {
+        return res.status(400).json({ error: 'Invalid webhook URL. Must be a valid HTTP or HTTPS URL.' });
+      }
+      updates.push('webhook_url = ?');
+      values.push(webhookUrl);
+    } else {
+      updates.push('webhook_url = ?');
+      values.push(null);
     }
   }
 
-  const stmt = db.prepare('UPDATE agents SET webhook_url = ? WHERE id = ?');
-  stmt.run(webhookUrl, agent.id);
+  // Handle webhook_secret
+  if (webhook_secret !== undefined) {
+    updates.push('webhook_secret = ?');
+    values.push(webhook_secret || null);
+  }
+
+  // Handle webhook_enabled
+  if (webhook_enabled !== undefined) {
+    updates.push('webhook_enabled = ?');
+    values.push(webhook_enabled ? 1 : 0);
+  }
+
+  if (updates.length === 0) {
+    return res.status(400).json({ error: 'No webhook fields to update' });
+  }
+
+  values.push(agent.id);
+  const stmt = db.prepare(`UPDATE agents SET ${updates.join(', ')} WHERE id = ?`);
+  stmt.run(...values);
+
+  // Get updated webhook config
+  const updated = db.prepare('SELECT webhook_url, webhook_enabled FROM agents WHERE id = ?').get(agent.id);
 
   res.json({
-    message: webhookUrl ? 'Webhook URL set' : 'Webhook URL removed',
-    webhook_url: webhookUrl
+    message: 'Webhook configuration updated',
+    webhook_url: updated?.webhook_url || null,
+    webhook_enabled: updated?.webhook_enabled === 1
   });
 });
 
-// Get webhook URL
+// Get webhook configuration
 router.get('/me/webhook', (req, res) => {
   const agent = req.agent;
   if (!agent) {
     return res.status(401).json({ error: 'Not authenticated' });
   }
 
-  res.json({ webhook_url: agent.webhook_url || null });
+  const config = db.prepare('SELECT webhook_url, webhook_enabled FROM agents WHERE id = ?').get(agent.id);
+
+  res.json({
+    webhook_url: config?.webhook_url || null,
+    webhook_enabled: config?.webhook_enabled === 1,
+    webhook_secret_configured: !!agent.webhook_secret
+  });
 });
 
 // Get agent by ID (public) - full profile with stats
