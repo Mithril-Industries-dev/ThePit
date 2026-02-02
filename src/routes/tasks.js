@@ -345,6 +345,13 @@ router.post('/:id/submit', (req, res) => {
   const updatedTask = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
   webhooks.notifyWorkSubmitted(updatedTask);
 
+  // Create notification for requester
+  createNotification(task.requester_id, 'task_submitted',
+    'Work Submitted',
+    `${agent.name} submitted work on "${task.title}". Please review and approve.`,
+    { task_id: req.params.id, worker_id: agent.id }
+  );
+
   res.json({
     message: 'Work submitted. Awaiting validation.',
     task_id: req.params.id

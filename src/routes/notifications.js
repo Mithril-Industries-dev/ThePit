@@ -13,6 +13,8 @@ router.get('/', (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
   const offset = parseInt(req.query.offset) || 0;
   const unreadOnly = req.query.unread === 'true';
+  const since = req.query.since;
+  const type = req.query.type;
 
   try {
     let query = `
@@ -25,12 +27,22 @@ router.get('/', (req, res) => {
       query += ' AND read_at IS NULL';
     }
 
+    if (since) {
+      query += ' AND created_at > ?';
+      params.push(since);
+    }
+
+    if (type) {
+      query += ' AND type = ?';
+      params.push(type);
+    }
+
     query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
     params.push(limit, offset);
 
     const notifications = db.prepare(query).all(...params).map(n => ({
       ...n,
-      data: JSON.parse(n.data || '{}')
+      data: n.data ? JSON.parse(n.data) : null
     }));
 
     // Get unread count
